@@ -17,7 +17,7 @@
 
 #### 1.2 Specifying Exempler and Targets
 
-使用套索来指定一个子结构(Fig.3a)，并通过一种structure-query技术来检索和目标样例相似的子结构(参考文献[4])。
+使用套索来指定一个子结构(Fig.3a)，并通过一种structure-query技术来检索和目标样例相似的子结构(参考文献[4]，CGH2019)。
 
 #### 1.3 User-driven fine-tuning
 
@@ -223,3 +223,72 @@ random walk的好处：
 ##### 1.2.3 算法
 
 random walk存在隐形bias，源自于选择的起始节点$u$。但是任务是学习所有节点的向量表征，因此算法从每个节点起始都会做random walk。
+
+
+
+## 2014_Deepwalk online learning of social representation
+
+本文贡献
+
+* 引入了deep learning来作为图分析工具，提取鲁棒的合适作为模型输入的表征。DEEPWALK学习短random walk的结构规律性
+* 在多分类任务上测试了我们的特征提取方法
+* 证明了算法的可扩展性，并提供了微小修改使其可以作为流水线处理的一部分。
+
+### 1. Learning Social Representations
+
+学到的表征应该有如下特征
+
+* Adaptability: 真实社交网络会不断变化，新的社交关系不应该要求重复训练
+* Community aware：在latent space两个节点的距离应该反应节点成员在社交网络上的相似性（homophily）
+
+* Low dimensional
+* Continous: 低维表征是连续性的，有着平滑的决策边界
+
+#### 1.1 Random Walk
+
+除了捕捉社区信息，使用random walk作为算法基础还有两个好处
+
+* 局部exploration方便并行化
+* 依赖short random walk获取的信息使得在适应图结构有微小变化的时候不需要重新进行全局的计算成为可能。可以迭代通过新的random walk来更新模型。
+
+#### 1.2 Connection：Power Laws
+
+如果连接图节点度的分布遵循幂定律，那么图中哪些节点出现在short random walk中也遵从幂定律分布。幂定律分布，例如zipf law，zipf law可以表述为在自然语言语料库中，一个单词出现的频率和他在频率表中的排名成反比，频率最高的单词频率大概是第二名的两倍，第二名是第四名的两倍等等。
+
+#### 1.3 语言模型
+
+给定词序列$W_1^n=(w_0, w_1, ..., w_n)$，通常希望在训练语料库中最大化$\Pr(w_n|w_0, w_1, ..., w_{n-1})$，在Deep Walk中也一样，最大化$\Pr(v_i|v_0, ..., v_{i-1})$。由于目标是学习latent representation而不是节点的co-occurence，因此引入映射函数$\Phi\in V^{|V|\times d}$，从而目标计算$\Pr(v_i|(\Phi(v_1),...\Phi(v_{i-1})))$，然而随着序列的增长，这种计算很困难。自然语言处理中对此问题有三个relaxation：
+
+* 使用一个单词来预测上下文
+* 上下文由给定单词的前后组成
+* 移除了序列中的顺序限制，一个窗口内的单词顺序不考虑
+
+从而优化问题变成了
+$$
+\min_\Phi -\log \Pr (\{v_{i-w}, ..., v_{i+w}\} \setminus v_i | Phi(v_i))
+$$
+其中$w$是窗口。
+
+### 2. Method
+
+类比自语言模型
+
+#### 2.1 random walk
+
+算法由两部分组成：random walk generator和update procedure。
+
+random walk generator：随机选取节点作为根节点，从根节点开始不断的随机选择邻居节点，直到达到规定长度。
+
+update procedure：借鉴的是词向量模型中的skip-gram的思路，取得random walk之后，最大化滑动窗口中每个词在窗口中出现的概率
+
+##### 2.1.1 Skip-Gram
+
+语言模型中的skip-gram最大化出现在同一窗口的单词的cooccurance probability。在本文Deep Walk算法中，每取得一个random walk序列后，依据预定义的窗口大小$w$，对每个窗口$W_{v_i}[j-w, j+w]$内的节点$u_k$，计算$J(\Phi)=-\log \Pr(u_k|\Phi(v_j))$和$\Phi=\Phi - \alpha \cdot \frac{\partial J}{\partial \Phi}$，$\Phi$为节点的表征映射矩阵
+
+#### 2.2 并行化
+
+节点在random walk中出现的频率分布遵从于power law，这造成了不频繁单词的long tail现象，因此影响$\Phi$的更新是稀疏的，这使得可以使用随机梯度下降的异步版本，从而实现并行化更新。
+
+### 3. 总结
+
+文章是将自然语言处理中序列模型借鉴过来用网络节点来表示，node2vec借鉴了这篇文章的思路方法
