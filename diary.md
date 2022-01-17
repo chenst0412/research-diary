@@ -294,3 +294,99 @@ update procedure：借鉴的是词向量模型中的skip-gram的思路，取得r
 ### 3. 总结
 
 文章是将自然语言处理中序列模型借鉴过来用网络节点来表示，node2vec借鉴了这篇文章的思路方法
+
+
+
+# 2022.01.16
+
+## 2017_struc2vec learning node representations from structural identity
+
+本文提出struc2vec，一种新颖的学习节点structural identity的表征的灵活框架，其使用层级来度量节点在不同尺度下的相似度，构建多层图来编码结构相似性并生成节点的结构上下文。
+
+通常最常用的确定节点的结构同一性的方法是基于distances或者recursions
+
+* distances：利用节点邻居信息的距离函数用于度量每一对节点之间的距离，然后实行聚类和匹配来将节点放置在等价类上。
+* recursions：构建相对于节点的递归并迭代展开直到收敛，最后的值决定等价类。
+
+Deepwalk和node2vec在分类任务中成功但是在结构等价类任务中经常失败的原因，是很多现实网络中的节点特征呈现很强的homophily，这意味着在这些算法中相邻节点更可能有着相同的特征，而网络中距离较远的节点则往往被隔离开不被考虑，即不能很好的抓住相距较远的节点的structural equivalence。（但是node2vec中明明有说提出的random walk构造方法通过超参数平衡homophily和structural equivalence，这个说法略奇怪）
+
+主要思路
+
+* 评估了独立于节点和边的属性以及他们在网络中的位置的结构相似性。不要求连通图
+* 建立层级衡量结构相似性
+* 生成节点的随机上下文，这是通过在多层图上进行加权随机游走得到的结构相似节点序列，这种随机上下文可以通过语言模型来进行学习
+
+结果标明Deepwalk和node2vec在捕捉structural identity上比较失败，但是该方法在此任务上执行的很好。
+
+### 1. Struct2Vec
+
+一个成功的方法应当有如下两个特性
+
+* 节点隐性表征的距离应当和structural identity高度相关。
+* 节点的隐性表征不应当依赖于节点和边的属性，以及他们的标签
+
+步骤：
+
+1. 对不同的邻居规模，确定每一对节点之间的结构相似性，从中可以构建出一个衡量节点结构相似度的层级，提供更多的信息来衡量每一个层级的节点相似度。
+2. 构建加权多层图，所有节点都会在每一层出现，并且各层都对应于衡量结构相似性层级的一个level
+3. 使用多层图来生成节点上下文，特别的，使用多层图上有偏随机游走来生成节点序列，序列更可能包含的是更有结构相似性的节点
+4. 使用Skip-gram等语言模型来学习隐形表征
+
+#### 1.1 Measuring structural similarity
+
+不使用节点和边的属性来构建节点之间的结构相似性。
+
+令$R_k(u)$表示节点$u$的图上距离为$k$的邻居，$s(S)$表示节点集合$S\subset V$的有序的度序列。对于两个节点$u, v$，定义$f_k(u, v)$表示当考虑$k$-hop邻居时两个节点的结构距离structural distance，**所谓$k$-hop指的是所有图上距离小于等于$k$的节点和他们之间所有的边**
+$$
+f_k(u, v)=f_{k-1}(u, v)+g(s(R_k(u)), s(R_k(v))), k\geq 0 \quad \&\& \quad |R_k(u)|, |R_k(v)| > 0
+$$
+其中$g(D_1, D_2)\geq0$衡量两个有序度序列的距离，且定义$f_{-1}=0$
+
+然后需要定义衡量两个有序度序列的距离的方法。（$g$）。两个度序列可能有着不同的长度，且其中每个元素都在$[0, n-1]$之间且可能有重复。采用**Dynamic Time Wrapping(DTW)**的方法，DTW寻找两个序列最佳的alignment，给定距离函数$d(a, b)$，DTW将每个$a\in A$匹配到$b\in B$，使得所有匹配比较的节点对距离之和最小，本文采用的距离函数如下
+$$
+d(a, b)=\frac{\max(a, b)}{\min(a, b)}-1
+$$
+这样两个相同的序列的距离也就为0
+
+#### 1.2 Constructing the context graph
+
+令$M$表示multilayer graph，其中layer $k$通过节点的$k$-hop邻居来定义。$k^*$是图直径。每一层$k=0, ..., k^*$通过节点集的加权无向完全图来定义，两个节点之间的权值为
+$$
+w_k(u, v)=e^{-f_k(u, v)}
+$$
+这样两个节点之间的结构距离越小，他们之间边的权值越大，在每一层上都是这样，两个节点的结构相似度越大（基于不同的$k$），他们之间边的权值越大。
+
+不同layer之间使用有向边连接。每个节点和他在其他$k+1, k-1$的layer的他自身有边的连接
+$$
+w(u_k, u_{k+1})=\log(\Gamma_k(u)+e), k=0, ..., k^*-1 \\
+w(u_k, u_{k-1})=1, k=1, ..., k^*
+$$
+其中
+$$
+\Gamma_k(u)=\sum_{v\in V}\mathbf 1(w_k(u, v)>\bar{w_k})
+$$
+$\bar{w_k}$是完全图layer $k$中所有边权值的平均值，$\Gamma_k(u)$指的是与$u$相连的权值大于图权值平均值的边的数目，这相当于是度量节点$u$和图中其他节点之间的相似度，因为两对节点的边权值越大表示他们的结构相似度越大。
+
+#### 1.3 Generating context for nodes
+
+每一步开始前，random walk确定是改变layer还是walk在当前的layer，这里定义一个概率$q$来表示这个值。若在当前layer进行下一步，则下一步游走的概率如下
+$$
+p_k(u, v)=\frac{e^{-f_k(u, v)}}{Z_k(u)}
+$$
+这样random walk更倾向于structural similarity更高的节点。这样节点$u\in V$的上下文更倾向于是结构相似节点，而和他们的标签以及在原图中的位置无关。若选择改变layer，则概率为
+$$
+p_k(u_k, u_{k+1}) =\frac{w(u_k, u_{k+1})}{w(u_k, u_{k+1})+w(u_k, u_{k-1})} \\
+p_k(u_k, u_{k-1}) =1-p_k(u_k, u_{k+1})
+$$
+即还是由概率来决定，从直觉上理解，当前$k$值下和节点$u$相似的节点较多，则倾向于扩大范围，到$k+1$层游走
+
+#### 1.4 Learning a language model
+
+和deepwalk，node2vec一样，构造随机游走后借鉴自然语言处理方面的方法，学习节点laten representation
+
+
+
+# 2022.01.17
+
+## 2019_motif2vec_Motif_Aware_Node_Representation_Learning_for_Heterogeneous_Networks
+
